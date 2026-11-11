@@ -65,6 +65,11 @@ export interface LinuxSandboxParams {
    */
   maskedFileStoreDir?: string
   enableWeakerNestedSandbox?: boolean
+  /**
+   * Do not pass --unshare-user to bwrap. Only honoured when bwrap is setuid
+   * root and the caller is not root; anything else throws.
+   */
+  skipUserNamespace?: boolean
   allowAllUnixSockets?: boolean
   binShell?: string
   ripgrepConfig?: { command: string; args?: string[] }
@@ -1727,6 +1732,7 @@ export async function wrapCommandWithSandboxLinux(
     maskedFileBinds,
     maskedFileStoreDir,
     enableWeakerNestedSandbox,
+    skipUserNamespace = false,
     allowAllUnixSockets,
     binShell,
     ripgrepConfig = { command: 'rg' },
@@ -1762,6 +1768,19 @@ export async function wrapCommandWithSandboxLinux(
     allowAllUnixSockets
   ) {
     return command
+  }
+
+  if (skipUserNamespace) {
+    if (enableWeakerNestedSandbox) {
+      throw new Error(
+        'skipUserNamespace cannot be combined with enableWeakerNestedSandbox',
+      )
+    }
+    if (!bwrapIsSetuidRootForCaller(bwrapPath)) {
+      throw new Error(
+        'skipUserNamespace requires a setuid-root bwrap and a non-root caller',
+      )
+    }
   }
 
   // Mark this sandbox invocation as active. cleanupBwrapMountPoints() will
@@ -1970,11 +1989,12 @@ export async function wrapCommandWithSandboxLinux(
       // apply-seccomp does not need caps here — it creates its own nested
       // userns to obtain CAP_SYS_ADMIN for its PID+mount unshare (see below).
       //
-      // A setuid-root bwrap called by a non-root user is the exception: it
-      // needs no userns, drops every capability itself before exec, and a
-      // forced userns makes it fail where the kernel refuses one (EPERM
-      // for any process in a chroot, e.g. some microVM guests).
-      if (!bwrapIsSetuidRootForCaller(bwrapPath)) {
+      // skipUserNamespace opts out of the forced userns for hosts where the
+      // kernel refuses one (EPERM for any process in a chroot, e.g. some
+      // microVM guests). It is only accepted, on entry, for a setuid-root
+      // bwrap called by a non-root user, which needs no userns and drops
+      // every capability itself before exec.
+      if (!skipUserNamespace) {
         bwrapArgs.push('--unshare-user')
       }
       bwrapArgs.push('--cap-drop', 'ALL', '--proc', '/proc')

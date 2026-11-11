@@ -1087,6 +1087,14 @@ export const SandboxRuntimeConfigSchema = z
       .boolean()
       .optional()
       .describe('Enable weaker nested sandbox mode (for Docker environments)'),
+    skipUserNamespace: z
+      .boolean()
+      .optional()
+      .describe(
+        'Do not create a user namespace for the sandbox (Linux only). Needed where the kernel refuses one, ' +
+          'such as a chrooted microVM guest. Requires a setuid-root bwrap and a non-root caller; the sandbox ' +
+          'fails to start otherwise. Isolation then relies on the setuid bwrap dropping its privileges.',
+      ),
     enableWeakerNetworkIsolation: z
       .boolean()
       .optional()

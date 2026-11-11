@@ -262,15 +262,8 @@ describe('restriction pattern semantics', () => {
     )
 
     it.if(isLinux)(
-      'secure branch passes --unshare-user and --cap-drop ALL when bwrap is not setuid root',
+      'secure branch always passes --unshare-user and --cap-drop ALL',
       async () => {
-        const bwrap = Bun.which('bwrap')
-        if (
-          bwrap &&
-          isSetuidRootForCaller(statSync(bwrap), process.geteuid?.() ?? 0)
-        ) {
-          return
-        }
         // bwrap only auto-creates a userns when EUID != 0; a root parent
         // would otherwise leave the sandboxed command with initial-userns
         // caps and be able to remount over --ro-bind / /. The default
@@ -287,7 +280,61 @@ describe('restriction pattern semantics', () => {
       },
     )
 
-    it('only a setuid-root file run by a non-root caller skips the user namespace', () => {
+    it.if(isLinux)(
+      'skipUserNamespace drops --unshare-user only for a setuid-root bwrap and a non-root caller',
+      async () => {
+        const bwrap = Bun.which('bwrap')
+        const wrap = (): Promise<string> =>
+          wrapCommandWithSandboxLinux({
+            command,
+            needsNetworkRestriction: false,
+            readConfig: { denyOnly: [] },
+            writeConfig: { allowOnly: ['/tmp'], denyWithinAllow: [] },
+            allowAllUnixSockets: true,
+            skipUserNamespace: true,
+          })
+
+        if (
+          bwrap &&
+          isSetuidRootForCaller(statSync(bwrap), process.geteuid?.() ?? 0)
+        ) {
+          const result = await wrap()
+          expect(result).not.toContain('--unshare-user')
+          expect(result).toContain('--cap-drop ALL')
+          expect(result).toContain('--proc /proc')
+        } else {
+          const failure = await wrap().then(
+            () => undefined,
+            (e: Error) => e.message,
+          )
+          expect(failure).toBe(
+            'skipUserNamespace requires a setuid-root bwrap and a non-root caller',
+          )
+        }
+      },
+    )
+
+    it.if(isLinux)(
+      'skipUserNamespace is rejected with enableWeakerNestedSandbox',
+      async () => {
+        const failure = await wrapCommandWithSandboxLinux({
+          command,
+          needsNetworkRestriction: false,
+          readConfig: { denyOnly: [] },
+          writeConfig: { allowOnly: ['/tmp'], denyWithinAllow: [] },
+          enableWeakerNestedSandbox: true,
+          skipUserNamespace: true,
+        }).then(
+          () => undefined,
+          (e: Error) => e.message,
+        )
+        expect(failure).toBe(
+          'skipUserNamespace cannot be combined with enableWeakerNestedSandbox',
+        )
+      },
+    )
+
+    it('only a setuid-root file is run as root by a non-root caller', () => {
       expect(isSetuidRootForCaller({ mode: 0o104755, uid: 0 }, 1000)).toBe(true)
       expect(isSetuidRootForCaller({ mode: 0o104755, uid: 0 }, 0)).toBe(false)
       expect(isSetuidRootForCaller({ mode: 0o100755, uid: 0 }, 1000)).toBe(

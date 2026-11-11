@@ -106,6 +106,7 @@ describe('Config Validation', () => {
         'git push': ['/usr/bin/nc'],
       },
       enableWeakerNestedSandbox: true,
+      skipUserNamespace: true,
       enableWeakerNetworkIsolation: false,
     }
 
