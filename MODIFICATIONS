@@ -10,4 +10,4 @@ Distribution: Native macOS and Linux x64/arm64 executables are built and smoke-t
 
 Upstream URL: https://github.com/anthropic-experimental/sandbox-runtime
 Modified-source URL: https://github.com/paksv/sandbox-runtime
-Base commit: c857ae7
+Base commit: f7a0f19 (v0.0.82)

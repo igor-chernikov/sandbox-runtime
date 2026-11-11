@@ -203,7 +203,8 @@ def rejection(kind, status, log, marker):
   require(status == "1", f"expected rejection exit 1, got {status}")
   require(not marker.exists(), f"rejected command ran: {marker}")
   if kind == "schema":
-    require("Invalid configuration" in output and "network.allowedDomains" in output and
+    require(("does not hold a valid config" in output or "Invalid configuration" in output) and
+            "network.allowedDomains" in output and
             "network.deniedDomains" in output, "missing schema validation diagnostic")
   else:
     reason = (r"missing|not found|not available|unavailable|required" if kind == "missing"

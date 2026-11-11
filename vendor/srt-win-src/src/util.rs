@@ -34,6 +34,59 @@ impl Drop for OwnedHandle {
     }
 }
 
+/// IDs of the threads `pid` has right now, from a Toolhelp snapshot.
+pub fn thread_ids_of(pid: u32) -> anyhow::Result<Vec<u32>> {
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+    };
+    let mut out = Vec::new();
+    unsafe {
+        let snap = OwnedHandle(
+            CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0)
+                .map_err(|e| anyhow::anyhow!("CreateToolhelp32Snapshot(threads): {e}"))?,
+        );
+        let mut te = THREADENTRY32 {
+            dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+            ..Default::default()
+        };
+        let mut more = Thread32First(snap.raw(), &mut te).is_ok();
+        while more {
+            if te.th32OwnerProcessID == pid {
+                out.push(te.th32ThreadID);
+            }
+            more = Thread32Next(snap.raw(), &mut te).is_ok();
+        }
+    }
+    Ok(out)
+}
+
+/// The parent process ID recorded for `pid`; `None` when not in the snapshot.
+#[cfg(feature = "test-hooks")]
+pub fn parent_pid_of(pid: u32) -> anyhow::Result<Option<u32>> {
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+        TH32CS_SNAPPROCESS,
+    };
+    unsafe {
+        let snap = OwnedHandle(
+            CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+                .map_err(|e| anyhow::anyhow!("CreateToolhelp32Snapshot(processes): {e}"))?,
+        );
+        let mut pe = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut more = Process32FirstW(snap.raw(), &mut pe).is_ok();
+        while more {
+            if pe.th32ProcessID == pid {
+                return Ok(Some(pe.th32ParentProcessID));
+            }
+            more = Process32NextW(snap.raw(), &mut pe).is_ok();
+        }
+    }
+    Ok(None)
+}
+
 /// UTF-8 → NUL-terminated UTF-16 buffer. Keep the returned `Vec`
 /// alive for as long as the resulting `PCWSTR` / `PWSTR` is in use.
 pub fn wstr(s: &str) -> Vec<u16> {
@@ -49,6 +102,17 @@ pub fn scrub_wstr(buf: &mut [u16]) {
         // SAFETY: `c` is a valid, aligned, exclusive `&mut u16`.
         unsafe { core::ptr::write_volatile(c, 0) };
     }
+}
+
+/// Encode `s` as a COUNTED (not NUL-terminated) UTF-16 buffer plus
+/// its length in BYTES — the shape `UNICODE_STRING` /
+/// `LSA_UNICODE_STRING` want in `Length`/`MaximumLength`. Callers
+/// build their (structurally identical, module-distinct) struct from
+/// the pair; the buffer must outlive it.
+pub fn counted_utf16(s: &str) -> (Vec<u16>, u16) {
+    let buf: Vec<u16> = s.encode_utf16().collect();
+    let bytes = (buf.len() * 2) as u16;
+    (buf, bytes)
 }
 
 /// Borrow a `Vec<u16>` from `wstr` as a `PCWSTR`.
@@ -222,11 +286,20 @@ pub fn enable_privilege(name: &str) -> anyhow::Result<bool> {
     unsafe { LookupPrivilegeValueW(PCWSTR::null(), pcwstr(&w), &mut luid) }
         .with_context(|| format!("LookupPrivilegeValue('{name}')"))?;
     let mut tok = HANDLE::default();
-    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &mut tok) }
-        .context("OpenProcessToken(ADJUST_PRIVILEGES)")?;
+    unsafe {
+        OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+            &mut tok,
+        )
+    }
+    .context("OpenProcessToken(ADJUST_PRIVILEGES)")?;
     let tp = TOKEN_PRIVILEGES {
         PrivilegeCount: 1,
-        Privileges: [LUID_AND_ATTRIBUTES { Luid: luid, Attributes: SE_PRIVILEGE_ENABLED }],
+        Privileges: [LUID_AND_ATTRIBUTES {
+            Luid: luid,
+            Attributes: SE_PRIVILEGE_ENABLED,
+        }],
     };
     let adjusted = unsafe { AdjustTokenPrivileges(tok, false, Some(&tp), 0, None, None) }
         .with_context(|| format!("AdjustTokenPrivileges('{name}')"));
@@ -234,7 +307,9 @@ pub fn enable_privilege(name: &str) -> anyhow::Result<bool> {
     // doesn't hold the privilege. Read it before CloseHandle can
     // clobber the thread's last-error.
     let assigned = unsafe { GetLastError() } != ERROR_NOT_ALL_ASSIGNED;
-    unsafe { let _ = CloseHandle(tok); }
+    unsafe {
+        let _ = CloseHandle(tok);
+    }
     adjusted?;
     Ok(assigned)
 }

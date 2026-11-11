@@ -27,11 +27,11 @@ the unrestricted-network change, the Linux helper changes and the JetBrains-only
 
 ## Versioning
 
-The version of record is the `JB_VERSION` file: `<upstream version>-jb.<n>`, currently `0.0.71-jb.2`.
+The version of record is the `JB_VERSION` file: `<upstream version>-jb.<n>`, currently `0.0.82-jb.1`.
 
 - Bump `<n>` when you rebuild the same upstream version (a workflow fix, a new dependency lockfile).
 - Bump the upstream part after a rebase onto a new upstream release, and reset `<n>` to 1.
-- `package.json` stays untouched, which is why `srt --version` still prints upstream's `1.0.0`. Identify
+- `package.json` stays untouched, which is why `srt --version` still prints upstream's `0.0.82`. Identify
   a build by its asset name and sha256, not by `--version`.
 
 ---
@@ -39,14 +39,14 @@ The version of record is the `JB_VERSION` file: `<upstream version>-jb.<n>`, cur
 ## Cutting a release
 
 ```bash
-# 1. optional: rebase onto a new upstream release first
+# 1. optional: update from a new upstream release first
 # 2. bump the version of record
-echo "0.0.71-jb.3" > JB_VERSION
-git commit -am "chore: JB_VERSION 0.0.71-jb.3"
+echo "0.0.82-jb.2" > JB_VERSION
+git commit -am "chore: JB_VERSION 0.0.82-jb.2"
 
-# 3. tag and push — the tag is the trigger
-git tag jb-v0.0.71-jb.3
-git push origin main jb-v0.0.71-jb.3
+# 3. tag and push - the tag is the trigger
+git tag jb-v0.0.82-jb.2
+git push origin HEAD jb-v0.0.82-jb.2
 ```
 
 The workflow refuses to publish if the tag does not equal `jb-v$(cat JB_VERSION)`, if `npm run build`
@@ -110,7 +110,7 @@ runtime. Signing here would only be thrown away.
 
 | Architecture | Runner label | Note |
 |---|---|---|
-| arm64 | `macos-14` | |
+| arm64 | `macos-15` | `macos-14` was retired by GitHub Actions. |
 | x86-64 | `macos-15-intel` | `macos-13` was retired on 2025-12-04. This is the **last** Intel image GitHub Actions offers, available until **August 2027** — after that the x64 asset needs a different build host (a self-hosted Intel Mac, or cross-compiling and giving up the native smoke test). |
 | Linux x86-64 | `ubuntu-24.04` | `bun-linux-x64-baseline`, SSE4.2 CPU target. |
 | Linux arm64 | `ubuntu-24.04-arm` | `bun-linux-arm64`, native AArch64. |
@@ -119,8 +119,7 @@ Each architecture is built on its own native host on purpose. `bun build --compi
 cross-compile, but a cross-compiled binary cannot be executed on the build host, so it could not be
 smoke-tested — and an unverified sandbox binary is exactly what must never be published.
 
-`bun` is pinned to `1.3.14`, matching `integration-tests.yml`. (`release.yml` still pins `1.3.1` for its
-seccomp job; leave it alone.)
+`bun` is pinned to `1.4.2`, matching `integration-tests.yml` and `release.yml`.
 
 ### Linux compatibility and host policy
 
