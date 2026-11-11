@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'bun:test'
 import { SandboxManager } from '../../src/sandbox/sandbox-manager.js'
 import type { SandboxRuntimeConfig } from '../../src/sandbox/sandbox-config.js'
-import { wrapCommandWithSandboxLinux } from '../../src/sandbox/linux-sandbox-utils.js'
+import {
+  isSetuidRootForCaller,
+  wrapCommandWithSandboxLinux,
+} from '../../src/sandbox/linux-sandbox-utils.js'
 import { wrapCommandWithSandboxMacOS } from '../../src/sandbox/macos-sandbox-utils.js'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { isLinux, isMacOS, isSupportedPlatform } from '../helpers/platform.js'
@@ -259,8 +262,15 @@ describe('restriction pattern semantics', () => {
     )
 
     it.if(isLinux)(
-      'secure branch always passes --unshare-user and --cap-drop ALL',
+      'secure branch passes --unshare-user and --cap-drop ALL when bwrap is not setuid root',
       async () => {
+        const bwrap = Bun.which('bwrap')
+        if (
+          bwrap &&
+          isSetuidRootForCaller(statSync(bwrap), process.geteuid?.() ?? 0)
+        ) {
+          return
+        }
         // bwrap only auto-creates a userns when EUID != 0; a root parent
         // would otherwise leave the sandboxed command with initial-userns
         // caps and be able to remount over --ro-bind / /. The default
@@ -276,6 +286,17 @@ describe('restriction pattern semantics', () => {
         expect(result).toContain('--cap-drop ALL')
       },
     )
+
+    it('only a setuid-root file run by a non-root caller skips the user namespace', () => {
+      expect(isSetuidRootForCaller({ mode: 0o104755, uid: 0 }, 1000)).toBe(true)
+      expect(isSetuidRootForCaller({ mode: 0o104755, uid: 0 }, 0)).toBe(false)
+      expect(isSetuidRootForCaller({ mode: 0o100755, uid: 0 }, 1000)).toBe(
+        false,
+      )
+      expect(isSetuidRootForCaller({ mode: 0o104755, uid: 1000 }, 1001)).toBe(
+        false,
+      )
+    })
 
     it.if(isLinux)(
       'non-empty denyOnly means has read restrictions on Linux',

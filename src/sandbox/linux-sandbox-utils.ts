@@ -510,6 +510,28 @@ export type LinuxDependencyOptions = {
   socatPath?: string
 }
 
+/**
+ * Whether a file with this mode and owner runs as root for a caller that is
+ * not root itself.
+ */
+export function isSetuidRootForCaller(
+  file: { mode: number; uid: number },
+  callerEuid: number,
+): boolean {
+  return callerEuid !== 0 && file.uid === 0 && (file.mode & 0o4000) !== 0
+}
+
+function bwrapIsSetuidRootForCaller(bwrapPath: string | undefined): boolean {
+  const resolved = bwrapPath ?? whichSync('bwrap')
+  const callerEuid = process.geteuid?.()
+  if (!resolved || callerEuid === undefined) return false
+  try {
+    return isSetuidRootForCaller(fs.statSync(resolved), callerEuid)
+  } catch {
+    return false
+  }
+}
+
 function isExecutable(p: string): boolean {
   try {
     fs.accessSync(p, fs.constants.X_OK)
@@ -1947,7 +1969,15 @@ export async function wrapCommandWithSandboxLinux(
       // the sandboxed process cannot remount regardless of parent EUID.
       // apply-seccomp does not need caps here — it creates its own nested
       // userns to obtain CAP_SYS_ADMIN for its PID+mount unshare (see below).
-      bwrapArgs.push('--unshare-user', '--cap-drop', 'ALL', '--proc', '/proc')
+      //
+      // A setuid-root bwrap called by a non-root user is the exception: it
+      // needs no userns, drops every capability itself before exec, and a
+      // forced userns makes it fail where the kernel refuses one (EPERM
+      // for any process in a chroot, e.g. some microVM guests).
+      if (!bwrapIsSetuidRootForCaller(bwrapPath)) {
+        bwrapArgs.push('--unshare-user')
+      }
+      bwrapArgs.push('--cap-drop', 'ALL', '--proc', '/proc')
     } else {
       // --unshare-user: bwrap only auto-adds this when EUID != 0. In an
       // unprivileged container (Docker's default: EUID=0 without
