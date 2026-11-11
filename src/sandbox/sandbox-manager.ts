@@ -1487,6 +1487,10 @@ function getEnableWeakerNestedSandbox(): boolean | undefined {
   return config?.enableWeakerNestedSandbox
 }
 
+function getSkipUserNamespace(): boolean | undefined {
+  return config?.skipUserNamespace
+}
+
 function getEnableWeakerNetworkIsolation(): boolean | undefined {
   return config?.enableWeakerNetworkIsolation
 }
@@ -1790,6 +1794,7 @@ async function wrapWithSandbox(
         maskedFileBinds: credentialRestrictions.maskedFileBinds,
         maskedFileStoreDir: credentialRestrictions.maskedFileStoreDir,
         enableWeakerNestedSandbox: getEnableWeakerNestedSandbox(),
+        skipUserNamespace: getSkipUserNamespace(),
         allowAllUnixSockets: getAllowAllUnixSockets(),
         binShell,
         ripgrepConfig: getRipgrepConfig(),

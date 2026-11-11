@@ -65,6 +65,11 @@ export interface LinuxSandboxParams {
    */
   maskedFileStoreDir?: string
   enableWeakerNestedSandbox?: boolean
+  /**
+   * Do not pass --unshare-user to bwrap. Only honoured when bwrap is setuid
+   * root and the caller is not root; anything else throws.
+   */
+  skipUserNamespace?: boolean
   allowAllUnixSockets?: boolean
   binShell?: string
   ripgrepConfig?: { command: string; args?: string[] }
@@ -508,6 +513,28 @@ export type LinuxDependencyOptions = {
   seccompConfig?: SeccompConfig
   bwrapPath?: string
   socatPath?: string
+}
+
+/**
+ * Whether a file with this mode and owner runs as root for a caller that is
+ * not root itself.
+ */
+export function isSetuidRootForCaller(
+  file: { mode: number; uid: number },
+  callerEuid: number,
+): boolean {
+  return callerEuid !== 0 && file.uid === 0 && (file.mode & 0o4000) !== 0
+}
+
+function bwrapIsSetuidRootForCaller(bwrapPath: string | undefined): boolean {
+  const resolved = bwrapPath ?? whichSync('bwrap')
+  const callerEuid = process.geteuid?.()
+  if (!resolved || callerEuid === undefined) return false
+  try {
+    return isSetuidRootForCaller(fs.statSync(resolved), callerEuid)
+  } catch {
+    return false
+  }
 }
 
 function isExecutable(p: string): boolean {
@@ -1705,6 +1732,7 @@ export async function wrapCommandWithSandboxLinux(
     maskedFileBinds,
     maskedFileStoreDir,
     enableWeakerNestedSandbox,
+    skipUserNamespace = false,
     allowAllUnixSockets,
     binShell,
     ripgrepConfig = { command: 'rg' },
@@ -1740,6 +1768,19 @@ export async function wrapCommandWithSandboxLinux(
     allowAllUnixSockets
   ) {
     return command
+  }
+
+  if (skipUserNamespace) {
+    if (enableWeakerNestedSandbox) {
+      throw new Error(
+        'skipUserNamespace cannot be combined with enableWeakerNestedSandbox',
+      )
+    }
+    if (!bwrapIsSetuidRootForCaller(bwrapPath)) {
+      throw new Error(
+        'skipUserNamespace requires a setuid-root bwrap and a non-root caller',
+      )
+    }
   }
 
   // Mark this sandbox invocation as active. cleanupBwrapMountPoints() will
@@ -1947,7 +1988,16 @@ export async function wrapCommandWithSandboxLinux(
       // the sandboxed process cannot remount regardless of parent EUID.
       // apply-seccomp does not need caps here — it creates its own nested
       // userns to obtain CAP_SYS_ADMIN for its PID+mount unshare (see below).
-      bwrapArgs.push('--unshare-user', '--cap-drop', 'ALL', '--proc', '/proc')
+      //
+      // skipUserNamespace opts out of the forced userns for hosts where the
+      // kernel refuses one (EPERM for any process in a chroot, e.g. some
+      // microVM guests). It is only accepted, on entry, for a setuid-root
+      // bwrap called by a non-root user, which needs no userns and drops
+      // every capability itself before exec.
+      if (!skipUserNamespace) {
+        bwrapArgs.push('--unshare-user')
+      }
+      bwrapArgs.push('--cap-drop', 'ALL', '--proc', '/proc')
     } else {
       // --unshare-user: bwrap only auto-adds this when EUID != 0. In an
       // unprivileged container (Docker's default: EUID=0 without

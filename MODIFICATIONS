@@ -4,6 +4,8 @@ Modification: Added an opt-in network.unrestricted configuration flag and --unre
 
 Modification: Linux standalone builds discover apply-seccomp beside the executable. Requested Unix-socket blocking fails closed when the helper is missing or not executable, including when no other restrictions are requested. Existing package-install lookup is preserved.
 
+Modification: Added an opt-in skipUserNamespace configuration flag. On Linux it omits --unshare-user so the sandbox starts where the kernel refuses a user namespace (a chrooted guest); it is accepted only when bwrap is setuid root and the caller is not root, and fails otherwise. --cap-drop ALL, --unshare-pid and --proc /proc are kept. Default behavior is unchanged.
+
 Distribution: Native macOS and Linux x64/arm64 executables are built and smoke-tested by release-junie.yml. Linux releases include an architecture-matched apply-seccomp helper; bubblewrap, socat and ripgrep remain system dependencies. See docs/jetbrains-build.md for the tested baseline and THIRD-PARTY for bundled dependency notices.
 
 Upstream URL: https://github.com/anthropic-experimental/sandbox-runtime
