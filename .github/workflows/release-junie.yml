@@ -6,56 +6,19 @@ name: Release (JetBrains)
 # upstream keeps rebases mechanical. See docs/jetbrains-build.md.
 
 on:
-  push:
-    tags: ['jb-v*']
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  test:
-    name: Test
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
-
-      # Same system dependencies integration-tests.yml installs on its macOS lane; srt shells out to rg.
-      - run: brew install ripgrep zsh
-
-      - run: npm ci
-
-      - run: npm run build
-
-      - run: npm test
-
   build:
     name: Build (${{ matrix.os }}-${{ matrix.arch }})
-    needs: test
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: arm64
-            os: darwin
-            runner: macos-15
-            target: bun-darwin-arm64
-          # macos-15-intel is the last x86-64 image Actions offers (until August 2027);
-          # macos-13 was retired on 2025-12-04. Each arch is built on its own native host so
-          # the smoke test below can actually execute the binary it just produced.
-          - arch: x64
-            os: darwin
-            runner: macos-15-intel
-            target: bun-darwin-x64
           - arch: x64
             os: linux
             runner: ubuntu-24.04
@@ -165,8 +128,7 @@ jobs:
   publish:
     name: Publish release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/jb-v')
-    runs-on: macos-15
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -176,15 +138,8 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Verify the tag matches JB_VERSION
-        run: |
-          version="$(tr -d '[:space:]' < JB_VERSION)"
-          tag="${GITHUB_REF#refs/tags/}"
-          if [ "$tag" != "jb-v${version}" ]; then
-            echo "Tag $tag does not match JB_VERSION ($version): expected jb-v${version}"
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_ENV"
+      - name: Resolve version
+        run: echo "version=$(tr -d '[:space:]' < JB_VERSION)" >> "$GITHUB_ENV"
 
       - uses: actions/download-artifact@v4
         with:
@@ -209,11 +164,7 @@ jobs:
         run: |
           gh release create "jb-v${version}" \
             --title "srt ${version} (JetBrains build)" \
-            --notes "Standalone macOS and Linux builds of srt ${version} for JetBrains Junie. Linux requires system bubblewrap, socat and ripgrep. Install the matching Linux helper beside srt as apply-seccomp. Consumers must verify the .sha256 assets. See MODIFICATIONS and docs/jetbrains-build.md for scope, baseline and licensing." \
-            "srt-${version}-darwin-arm64" \
-            "srt-${version}-darwin-arm64.sha256" \
-            "srt-${version}-darwin-x64" \
-            "srt-${version}-darwin-x64.sha256" \
+            --notes "Temporary Linux-only release from the igor-chernikov fork: no macOS binaries. Standalone Linux builds of srt ${version} for JetBrains Junie. Linux requires system bubblewrap, socat and ripgrep. Install the matching Linux helper beside srt as apply-seccomp. Consumers must verify the .sha256 assets. See MODIFICATIONS and docs/jetbrains-build.md for scope, baseline and licensing." \
             "srt-${version}-linux-arm64" \
             "srt-${version}-linux-arm64.sha256" \
             "srt-${version}-linux-x64" \
